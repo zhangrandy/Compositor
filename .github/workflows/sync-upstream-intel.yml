@@ -1,0 +1,58 @@
+name: Sync Upstream → Intel Sequoia
+
+on:
+  workflow_dispatch:
+  schedule:
+    - cron: "0 2 * * *"
+
+permissions:
+  contents: write
+
+jobs:
+  sync-and-build:
+    runs-on: macos-15
+
+    steps:
+      - name: Checkout Intel Sequoia
+        uses: actions/checkout@v4
+        with:
+          ref: intel-sequoia
+          fetch-depth: 0
+
+      - name: Select Xcode 26.3
+        run: |
+          sudo xcode-select -s /Applications/Xcode_26.3.app
+          xcodebuild -version
+
+      - name: Fetch upstream
+        run: |
+          git remote add upstream https://github.com/robbietilton/Compositor.git
+          git fetch upstream main
+
+      - name: Merge upstream without committing
+        run: |
+          git merge --no-commit --no-ff upstream/main || {
+            echo "::error::Upstream merge has conflicts. Intel branch was NOT changed."
+            git merge --abort || true
+            exit 1
+          }
+
+      - name: Build Intel version
+        run: |
+          xcodebuild \
+            -project Compositor.xcodeproj \
+            -scheme Compositor \
+            -configuration Release \
+            -arch x86_64 \
+            ARCHS=x86_64 \
+            ONLY_ACTIVE_ARCH=NO \
+            MACOSX_DEPLOYMENT_TARGET=15.0 \
+            CODE_SIGNING_ALLOWED=NO \
+            build
+
+      - name: Commit successful upstream merge
+        run: |
+          git config user.name "github-actions[bot]"
+          git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
+          git commit -m "Sync upstream main"
+          git push origin HEAD:intel-sequoia
