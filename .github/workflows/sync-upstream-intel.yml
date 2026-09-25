@@ -190,13 +190,15 @@ jobs:
             CODE_SIGNING_ALLOWED=NO \
             CODE_SIGNING_REQUIRED=NO \
             build
+
       - name: Package Intel macOS 15 app
         run: |
           cd build/Build/Products/Release
-          ditto -c -k --sequesterRsrc --keepParent Compositor.app "$GITHUB_WORKSPACE/Compositor-Intel-macOS15.zip"            
-      
+          tar -czf "$GITHUB_WORKSPACE/Compositor-Intel-macOS15.tar.gz" Compositor.app
+
       - name: Upload Intel macOS 15 app
         uses: actions/upload-artifact@v4
         with:
-          name: Compositor-Intel-macOS15
-          path: build/Build/Products/Release/Compositor.app            
+          path: Compositor-Intel-macOS15.tar.gz
+          archive: false
+          
