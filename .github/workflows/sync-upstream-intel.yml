@@ -24,87 +24,23 @@ jobs:
           xcodebuild -version
           xcode-select -p
 
-      - name: Apply macOS 15 compatibility patch
+      - name: Inspect current upstream ContentView
         run: |
-          cat > /tmp/macos15.patch <<'PATCH'
-          diff --git a/Compositor/ContentView.swift b/Compositor/ContentView.swift
-          --- a/Compositor/ContentView.swift
-          +++ b/Compositor/ContentView.swift
-          @@
-          -            ToolbarSpacer(.fixed, placement: .navigation)
-          +            if #available(macOS 26.0, *) {
-          +                ToolbarSpacer(.fixed, placement: .navigation)
-          +            }
-                       if let workspace = applicationDelegate?.workspace {
-          -                ToolbarItem(placement: .navigation) {
-          -                    ProjectTabStrip(workspace: workspace)
-          -                        .frame(minWidth: 100)
-          -                }
-          -                .sharedBackgroundVisibility(.hidden)
-          +                if #available(macOS 26.0, *) {
-          +                    ToolbarItem(placement: .navigation) {
-          +                        ProjectTabStrip(workspace: workspace)
-          +                            .frame(minWidth: 100)
-          +                    }
-          +                    .sharedBackgroundVisibility(.hidden)
-          +                } else {
-          +                    ToolbarItem(placement: .navigation) {
-          +                        ProjectTabStrip(workspace: workspace)
-          +                            .frame(minWidth: 100)
-          +                    }
-          +                }
-                       }
-          @@
-          -            ToolbarSpacer(.flexible, placement: .navigation)
-          +            if #available(macOS 26.0, *) {
-          +                ToolbarSpacer(.flexible, placement: .navigation)
-          +            }
-          PATCH
+          echo "=== ContentView.swift toolbar section ==="
+          nl -ba Compositor/ContentView.swift | sed -n '150,190p'
 
-          echo "Checking ContentView patch..."
-          git apply --check /tmp/macos15.patch
+          echo
+          echo "=== All macOS 26 APIs in ContentView.swift ==="
+          grep -nE 'ToolbarSpacer|sharedBackgroundVisibility' \
+            Compositor/ContentView.swift || true
 
-          echo "Applying ContentView patch..."
-          git apply /tmp/macos15.patch
+          echo
+          echo "=== borderShape occurrences ==="
+          grep -n 'borderShape' \
+            Compositor/UI/BlendModePicker.swift \
+            Compositor/UI/TypeControls.swift || true
 
-          python3 <<'PY'
-          from pathlib import Path
-
-          def replace_once(path, old, new):
-              path = Path(path)
-              text = path.read_text()
-              count = text.count(old)
-
-              if count != 1:
-                  raise SystemExit(
-                      f"Expected exactly 1 occurrence in {path}, found {count}"
-                  )
-
-              path.write_text(text.replace(old, new, 1))
-              print(f"Patched {path}")
-
-          replace_once(
-              "Compositor/UI/BlendModePicker.swift",
-              "        button.borderShape = .capsule",
-              """        if #available(macOS 26.0, *) {
-                  button.borderShape = .capsule
-              } else {
-                  button.bezelStyle = .rounded
-              }"""
-          )
-
-          replace_once(
-              "Compositor/UI/TypeControls.swift",
-              "        button.borderShape = .capsule",
-              """        if #available(macOS 26.0, *) {
-                  button.borderShape = .capsule
-              } else {
-                  button.bezelStyle = .rounded
-              }"""
-          )
-
-          print("macOS 15 compatibility patch applied successfully.")
-          PY
+          exit 1
 
       - name: Show compatibility changes
         run: |
