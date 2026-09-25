@@ -1,53 +1,45 @@
-name: Build Compositor for Intel macOS 15
+name: Test Upstream + macOS 15 Compatibility
 
 on:
   workflow_dispatch:
 
+permissions:
+  contents: write
+
 jobs:
-  build:
-    name: Intel macOS 15 / Xcode inspection
+  test:
+    name: Upstream + PR #8 / Intel macOS 15
     runs-on: macos-15
 
     steps:
-      - name: Checkout Compositor macOS 15 PR
+      - name: Checkout latest upstream
         uses: actions/checkout@v4
         with:
           repository: robbietilton/Compositor
-          ref: refs/pull/8/head
-          fetch-depth: 1
+          ref: main
+          fetch-depth: 0
 
-      - name: Select Xcode 26.3
+      - name: Select Xcode
         run: |
-          sudo xcode-select -s /Applications/Xcode_26.3.app
-          
-          echo "=== Xcode ==="
+          echo "=== Installed Xcodes ==="
+          ls -1 /Applications | grep '^Xcode' || true
+
+          echo
+          echo "=== Current developer directory ==="
+          xcode-select -p
+
+          echo
+          echo "=== Current Xcode ==="
           xcodebuild -version
 
-          echo
-          echo "=== SDK ==="
-          xcrun --sdk macosx --show-sdk-path
-
-          echo
-          echo "=== Swift ==="
-          swift --version
-
-          echo
-          echo "=== Runner architecture ==="
-          uname -m
-
-          echo
-          echo "=== Target architecture ==="
-          xcodebuild -project Compositor.xcodeproj \
-            -scheme Compositor \
-            -showBuildSettings | \
-            grep -E 'ARCHS|MACOSX_DEPLOYMENT_TARGET'
-
-      - name: Resolve Swift packages
+      - name: Fetch PR #8 compatibility commit
         run: |
-          xcodebuild \
-            -resolvePackageDependencies \
-            -project Compositor.xcodeproj \
-            -scheme Compositor
+          git fetch https://github.com/gingerbeardman/Compositor.git \
+            ec64a9bd990a3f0a6a350a36ca6fe435026d4b04
+
+      - name: Apply PR #8
+        run: |
+          git cherry-pick ec64a9bd990a3f0a6a350a36ca6fe435026d4b04
 
       - name: Build Intel Release
         run: |
@@ -65,69 +57,3 @@ jobs:
             CODE_SIGNING_ALLOWED=NO \
             CODE_SIGNING_REQUIRED=NO \
             build
-
-      - name: Verify Intel architecture
-        run: |
-          APP="$GITHUB_WORKSPACE/build/Build/Products/Release/Compositor.app"
-          BINARY="$APP/Contents/MacOS/Compositor"
-
-          echo "=== Executable ==="
-          file "$BINARY"
-
-          echo
-          echo "=== Architectures ==="
-          lipo -info "$BINARY"
-
-          echo
-          echo "=== App ==="
-          ls -lah "$APP"
-
-      - name: Verify deployment target
-        run: |
-          APP="$GITHUB_WORKSPACE/build/Build/Products/Release/Compositor.app"
-          BINARY="$APP/Contents/MacOS/Compositor"
-
-          echo "=== LC_BUILD_VERSION ==="
-          otool -l "$BINARY" | grep -A3 LC_BUILD_VERSION
-
-      - name: Ad-hoc sign
-        run: |
-          APP="$GITHUB_WORKSPACE/build/Build/Products/Release/Compositor.app"
-
-          codesign \
-            --deep \
-            --force \
-            --verbose \
-            --sign - \
-            "$APP"
-
-          codesign \
-            --verify \
-            --deep \
-            --strict \
-            --verbose \
-            "$APP"
-
-      - name: Package app
-        run: |
-          mkdir -p dist
-
-          ditto \
-            -c \
-            -k \
-            --keepParent \
-            "$GITHUB_WORKSPACE/build/Build/Products/Release/Compositor.app" \
-            "dist/Compositor-macOS15-Intel.zip"
-
-      - name: Generate checksum
-        run: |
-          echo "=== SHA-256 ==="
-          shasum -a 256 dist/Compositor-macOS15-Intel.zip
-
-      - name: Upload Intel macOS 15 build
-        uses: actions/upload-artifact@v4
-        with:
-          name: Compositor-macOS15-Intel
-          path: dist/Compositor-macOS15-Intel.zip
-          if-no-files-found: error
-          retention-days: 30
