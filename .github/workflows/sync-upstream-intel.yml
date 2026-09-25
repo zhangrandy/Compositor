@@ -13,10 +13,11 @@ jobs:
     runs-on: macos-15
 
     steps:
-      - name: Checkout Intel Sequoia
+      - name: Checkout latest upstream
         uses: actions/checkout@v4
         with:
-          ref: intel-sequoia
+          repository: robbietilton/Compositor
+          ref: main
           fetch-depth: 0
 
       - name: Select Xcode 26.3
@@ -24,35 +25,43 @@ jobs:
           sudo xcode-select -s /Applications/Xcode_26.3.app
           xcodebuild -version
 
-      - name: Fetch upstream
+      - name: Apply Intel / macOS 15 compatibility patch
         run: |
-          git remote add upstream https://github.com/robbietilton/Compositor.git
-          git fetch upstream main
+          git fetch https://github.com/robbietilton/Compositor.git \
+            ec64a9bd990a3f0a6a350a36ca6fe435026d4b04
 
-      - name: Merge upstream without committing
-        run: |
-          git merge --no-commit --no-ff upstream/main || {
-            echo "::error::Upstream merge has conflicts. Intel branch was NOT changed."
-            git merge --abort || true
-            exit 1
-          }
+          git cherry-pick ec64a9bd990a3f0a6a350a36ca6fe435026d4b04
 
-      - name: Build Intel version
+      - name: Build Intel Release
         run: |
+          set -o pipefail
+
           xcodebuild \
             -project Compositor.xcodeproj \
             -scheme Compositor \
             -configuration Release \
-            -arch x86_64 \
+            -derivedDataPath "$GITHUB_WORKSPACE/build" \
+            -destination 'generic/platform=macOS' \
             ARCHS=x86_64 \
             ONLY_ACTIVE_ARCH=NO \
             MACOSX_DEPLOYMENT_TARGET=15.0 \
             CODE_SIGNING_ALLOWED=NO \
+            CODE_SIGNING_REQUIRED=NO \
             build
 
-      - name: Commit successful upstream merge
+      - name: Verify Intel architecture
+        run: |
+          APP="$GITHUB_WORKSPACE/build/Build/Products/Release/Compositor.app"
+          BINARY="$APP/Contents/MacOS/Compositor"
+
+          file "$BINARY"
+          lipo -info "$BINARY"
+
+      - name: Update intel-sequoia
         run: |
           git config user.name "github-actions[bot]"
           git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
-          git commit -m "Sync upstream main"
-          git push origin HEAD:intel-sequoia
+
+          git push \
+            https://x-access-token:${{ secrets.GITHUB_TOKEN }}@github.com/${{ github.repository }}.git \
+            HEAD:intel-sequoia
