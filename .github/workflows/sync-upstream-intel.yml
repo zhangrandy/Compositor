@@ -24,23 +24,125 @@ jobs:
           xcodebuild -version
           xcode-select -p
 
-      - name: Inspect current upstream ContentView
+      - name: Apply macOS 15 compatibility patch
         run: |
-          echo "=== ContentView.swift toolbar section ==="
-          nl -ba Compositor/ContentView.swift | sed -n '150,190p'
+          python3 <<'PY'
+          from pathlib import Path
 
-          echo
-          echo "=== All macOS 26 APIs in ContentView.swift ==="
-          grep -nE 'ToolbarSpacer|sharedBackgroundVisibility' \
-            Compositor/ContentView.swift || true
+          def replace_once(path, old, new):
+              path = Path(path)
+              text = path.read_text()
+              count = text.count(old)
 
-          echo
-          echo "=== borderShape occurrences ==="
-          grep -n 'borderShape' \
+              if count != 1:
+                  raise SystemExit(
+                      f"Expected exactly 1 occurrence in {path}, found {count}: {old!r}"
+                  )
+
+              path.write_text(text.replace(old, new, 1))
+              print(f"Patched {path}")
+
+          # ContentView.swift — ToolbarSpacer fixed
+          replace_once(
+              "Compositor/ContentView.swift",
+              "            ToolbarSpacer(.fixed, placement: .navigation)",
+              """            if #available(macOS 26.0, *) {
+                  ToolbarSpacer(.fixed, placement: .navigation)
+              }"""
+          )
+
+          # ContentView.swift — ProjectTabStrip toolbar item.
+          # sharedBackgroundVisibility is macOS 26-only, so the entire
+          # ToolbarItem must be conditionally compiled at runtime.
+          replace_once(
+              "Compositor/ContentView.swift",
+              """            if let workspace = applicationDelegate?.workspace {
+                  ToolbarItem(placement: .navigation) {
+                      ProjectTabStrip(workspace: workspace)
+                          // As wide as the toolbar allows: the window less the traffic lights and New button before it
+                          // and the zoom controls after it. Bounded, so adding tabs never pushes those aside; the
+                          // strip scrolls instead.
+                          .frame(width: max(200, windowWidth - 352), height: 34, alignment: .center)
+                  }
+                  .sharedBackgroundVisibility(.hidden)
+              }""",
+              """            if let workspace = applicationDelegate?.workspace {
+                  if #available(macOS 26.0, *) {
+                      ToolbarItem(placement: .navigation) {
+                          ProjectTabStrip(workspace: workspace)
+                              // As wide as the toolbar allows: the window less the traffic lights and New button before it
+                              // and the zoom controls after it. Bounded, so adding tabs never pushes those aside; the
+                              // strip scrolls instead.
+                              .frame(width: max(200, windowWidth - 352), height: 34, alignment: .center)
+                      }
+                      .sharedBackgroundVisibility(.hidden)
+                  } else {
+                      ToolbarItem(placement: .navigation) {
+                          ProjectTabStrip(workspace: workspace)
+                              // As wide as the toolbar allows: the window less the traffic lights and New button before it
+                              // and the zoom controls after it. Bounded, so adding tabs never pushes those aside; the
+                              // strip scrolls instead.
+                              .frame(width: max(200, windowWidth - 352), height: 34, alignment: .center)
+                      }
+                  }
+              }"""
+          )
+
+          # ContentView.swift — ToolbarSpacer flexible
+          replace_once(
+              "Compositor/ContentView.swift",
+              "            ToolbarSpacer(.flexible, placement: .navigation)",
+              """            if #available(macOS 26.0, *) {
+                  ToolbarSpacer(.flexible, placement: .navigation)
+              }"""
+          )
+
+          # BlendModePicker.swift
+          replace_once(
+              "Compositor/UI/BlendModePicker.swift",
+              "        button.borderShape = .capsule",
+              """        if #available(macOS 26.0, *) {
+                  button.borderShape = .capsule
+              } else {
+                  button.bezelStyle = .rounded
+              }"""
+          )
+
+          # TypeControls.swift
+          replace_once(
+              "Compositor/UI/TypeControls.swift",
+              "        button.borderShape = .capsule",
+              """        if #available(macOS 26.0, *) {
+                  button.borderShape = .capsule
+              } else {
+                  button.bezelStyle = .rounded
+              }"""
+          )
+
+          print("macOS 15 compatibility patch applied successfully.")
+          PY
+
+      - name: Show compatibility changes
+        run: |
+          git diff -- \
+            Compositor/ContentView.swift \
             Compositor/UI/BlendModePicker.swift \
-            Compositor/UI/TypeControls.swift || true
+            Compositor/UI/TypeControls.swift
 
-          exit 1
+      - name: Build Intel macOS 15 release
+        run: |
+          xcodebuild \
+            -project Compositor.xcodeproj \
+            -scheme Compositor \
+            -configuration Release \
+            -derivedDataPath "$GITHUB_WORKSPACE/build" \
+            -destination 'generic/platform=macOS' \
+            ARCHS=x86_64 \
+            ONLY_ACTIVE_ARCH=NO \
+            MACOSX_DEPLOYMENT_TARGET=15.0 \
+            CODE_SIGNING_ALLOWED=NO \
+            CODE_SIGNING_REQUIRED=NO \
+            build
 
       - name: Show compatibility changes
         run: |
