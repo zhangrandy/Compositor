@@ -26,6 +26,47 @@ jobs:
 
       - name: Apply macOS 15 compatibility patch
         run: |
+          cat > /tmp/macos15.patch <<'PATCH'
+          diff --git a/Compositor/ContentView.swift b/Compositor/ContentView.swift
+          --- a/Compositor/ContentView.swift
+          +++ b/Compositor/ContentView.swift
+          @@
+          -            ToolbarSpacer(.fixed, placement: .navigation)
+          +            if #available(macOS 26.0, *) {
+          +                ToolbarSpacer(.fixed, placement: .navigation)
+          +            }
+                       if let workspace = applicationDelegate?.workspace {
+          -                ToolbarItem(placement: .navigation) {
+          -                    ProjectTabStrip(workspace: workspace)
+          -                        .frame(minWidth: 100)
+          -                }
+          -                .sharedBackgroundVisibility(.hidden)
+          +                if #available(macOS 26.0, *) {
+          +                    ToolbarItem(placement: .navigation) {
+          +                        ProjectTabStrip(workspace: workspace)
+          +                            .frame(minWidth: 100)
+          +                    }
+          +                    .sharedBackgroundVisibility(.hidden)
+          +                } else {
+          +                    ToolbarItem(placement: .navigation) {
+          +                        ProjectTabStrip(workspace: workspace)
+          +                            .frame(minWidth: 100)
+          +                    }
+          +                }
+                       }
+          @@
+          -            ToolbarSpacer(.flexible, placement: .navigation)
+          +            if #available(macOS 26.0, *) {
+          +                ToolbarSpacer(.flexible, placement: .navigation)
+          +            }
+          PATCH
+
+          echo "Checking ContentView patch..."
+          git apply --check /tmp/macos15.patch
+
+          echo "Applying ContentView patch..."
+          git apply /tmp/macos15.patch
+
           python3 <<'PY'
           from pathlib import Path
 
@@ -36,116 +77,11 @@ jobs:
 
               if count != 1:
                   raise SystemExit(
-                      f"Expected exactly 1 occurrence in {path}, found {count}: {old!r}"
+                      f"Expected exactly 1 occurrence in {path}, found {count}"
                   )
 
               path.write_text(text.replace(old, new, 1))
               print(f"Patched {path}")
-
-          # ------------------------------------------------------------
-          # ContentView.swift
-          # ------------------------------------------------------------
-
-          replace_once(
-              "Compositor/ContentView.swift",
-              "            ToolbarSpacer(.fixed, placement: .navigation)",
-              """            if #available(macOS 26.0, *) {
-                  ToolbarSpacer(.fixed, placement: .navigation)
-              }"""
-          )
-
-          replace_once(
-              "Compositor/ContentView.swift",
-              "            ToolbarSpacer(.flexible, placement: .navigation)",
-              """            if #available(macOS 26.0, *) {
-                  ToolbarSpacer(.flexible, placement: .navigation)
-              }"""
-          )
-
-          # Find the ToolbarItem immediately preceding the unique
-          # sharedBackgroundVisibility modifier and wrap that item.
-          path = Path("Compositor/ContentView.swift")
-          lines = path.read_text().splitlines()
-
-          modifier_indexes = [
-              i for i, line in enumerate(lines)
-              if ".sharedBackgroundVisibility(.hidden)" in line
-          ]
-
-          if len(modifier_indexes) != 1:
-              raise SystemExit(
-                  "Expected exactly 1 sharedBackgroundVisibility modifier, "
-                  f"found {len(modifier_indexes)}"
-              )
-
-          modifier_index = modifier_indexes[0]
-
-          # The modifier belongs to the ToolbarItem immediately above it.
-          toolbar_start = None
-          depth = 0
-
-          for i in range(modifier_index - 1, -1, -1):
-              line = lines[i]
-
-              if line == "            ToolbarItem(placement: .navigation) {":
-                  toolbar_start = i
-                  break
-
-          if toolbar_start is None:
-              raise SystemExit(
-                  "Could not find ToolbarItem preceding "
-                  "sharedBackgroundVisibility"
-              )
-
-          # Find the closing brace belonging to this ToolbarItem.
-          depth = 0
-          toolbar_end = None
-
-          for i in range(toolbar_start, modifier_index + 1):
-              depth += lines[i].count("{")
-              depth -= lines[i].count("}")
-
-              if i > toolbar_start and depth == 0:
-                  toolbar_end = i
-                  break
-
-          if toolbar_end is None:
-              raise SystemExit("Could not find end of ToolbarItem")
-
-          # Include the modifier line in the macOS 26 branch.
-          item = lines[toolbar_start:modifier_index + 1]
-
-          # The original item is 12-space indented.
-          # Put it four spaces deeper inside each availability branch.
-          nested_item = [
-              "    " + line
-              for line in item
-          ]
-
-          replacement = [
-              "            if #available(macOS 26.0, *) {",
-              *nested_item,
-              "            } else {",
-          ]
-
-          # For the macOS 15 branch, remove the macOS-26-only modifier.
-          fallback_item = [
-              "    " + line
-              for line in item
-              if ".sharedBackgroundVisibility(.hidden)" not in line
-          ]
-
-          replacement.extend(fallback_item)
-          replacement.append("            }")
-
-          lines[toolbar_start:modifier_index + 1] = replacement
-
-          path.write_text("\n".join(lines) + "\n")
-          print("Patched ContentView.swift sharedBackgroundVisibility")
-
-          # ------------------------------------------------------------
-          # BlendModePicker.swift
-          # ------------------------------------------------------------
 
           replace_once(
               "Compositor/UI/BlendModePicker.swift",
@@ -156,10 +92,6 @@ jobs:
                   button.bezelStyle = .rounded
               }"""
           )
-
-          # ------------------------------------------------------------
-          # TypeControls.swift
-          # ------------------------------------------------------------
 
           replace_once(
               "Compositor/UI/TypeControls.swift",
