@@ -32,12 +32,11 @@ jobs:
           def replace_once(path, old, new):
               path = Path(path)
               text = path.read_text()
-
               count = text.count(old)
 
               if count != 1:
                   raise SystemExit(
-                      f"Expected exactly 1 occurrence in {path}, found {count}"
+                      f"Expected exactly 1 occurrence in {path}, found {count}: {old!r}"
                   )
 
               path.write_text(text.replace(old, new, 1))
@@ -49,7 +48,7 @@ jobs:
 
           replace_once(
               "Compositor/ContentView.swift",
-              """            ToolbarSpacer(.fixed, placement: .navigation)""",
+              "            ToolbarSpacer(.fixed, placement: .navigation)",
               """            if #available(macOS 26.0, *) {
                   ToolbarSpacer(.fixed, placement: .navigation)
               }"""
@@ -57,35 +56,18 @@ jobs:
 
           replace_once(
               "Compositor/ContentView.swift",
-              """            if let workspace = applicationDelegate?.workspace {
-                  ToolbarItem(placement: .navigation) {
-                      ProjectTabStrip(workspace: workspace)
-                          .frame(minWidth: 100)
-                  }
-                  .sharedBackgroundVisibility(.hidden)
-              }""",
-              """            if let workspace = applicationDelegate?.workspace {
-                  if #available(macOS 26.0, *) {
-                      ToolbarItem(placement: .navigation) {
-                          ProjectTabStrip(workspace: workspace)
-                              .frame(minWidth: 100)
-                      }
-                      .sharedBackgroundVisibility(.hidden)
-                  } else {
-                      ToolbarItem(placement: .navigation) {
-                          ProjectTabStrip(workspace: workspace)
-                              .frame(minWidth: 100)
-                      }
-                  }
+              "            ToolbarSpacer(.flexible, placement: .navigation)",
+              """            if #available(macOS 26.0, *) {
+                  ToolbarSpacer(.flexible, placement: .navigation)
               }"""
           )
 
           replace_once(
               "Compositor/ContentView.swift",
-              """            ToolbarSpacer(.flexible, placement: .navigation)""",
-              """            if #available(macOS 26.0, *) {
-                  ToolbarSpacer(.flexible, placement: .navigation)
-              }"""
+              "                .sharedBackgroundVisibility(.hidden)",
+              """                if #available(macOS 26.0, *) {
+                      .sharedBackgroundVisibility(.hidden)
+                  }"""
           )
 
           # ------------------------------------------------------------
@@ -94,7 +76,7 @@ jobs:
 
           replace_once(
               "Compositor/UI/BlendModePicker.swift",
-              """        button.borderShape = .capsule""",
+              "        button.borderShape = .capsule",
               """        if #available(macOS 26.0, *) {
                   button.borderShape = .capsule
               } else {
@@ -108,7 +90,7 @@ jobs:
 
           replace_once(
               "Compositor/UI/TypeControls.swift",
-              """        button.borderShape = .capsule""",
+              "        button.borderShape = .capsule",
               """        if #available(macOS 26.0, *) {
                   button.borderShape = .capsule
               } else {
