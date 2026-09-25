@@ -1,41 +1,133 @@
-name: Sync Upstream → Intel Sequoia
+name: Test Upstream → Intel Sequoia
 
 on:
   workflow_dispatch:
-  schedule:
-    - cron: "0 2 * * *"
 
 permissions:
-  contents: write
+  contents: read
 
 jobs:
-  sync-and-build:
+  build:
     runs-on: macos-15
 
     steps:
-      - name: Checkout latest upstream
+      - name: Checkout current upstream main
         uses: actions/checkout@v4
         with:
           repository: robbietilton/Compositor
           ref: main
-          fetch-depth: 0
+          fetch-depth: 1
 
       - name: Select Xcode 26.3
         run: |
           sudo xcode-select -s /Applications/Xcode_26.3.app
           xcodebuild -version
+          xcode-select -p
 
-      - name: Apply Intel / macOS 15 compatibility patch
+      - name: Apply macOS 15 compatibility patch
         run: |
-          git fetch https://github.com/robbietilton/Compositor.git \
-            ec64a9bd990a3f0a6a350a36ca6fe435026d4b04
+          python3 <<'PY'
+          from pathlib import Path
 
-          git cherry-pick ec64a9bd990a3f0a6a350a36ca6fe435026d4b04
+          def replace_once(path, old, new):
+              path = Path(path)
+              text = path.read_text()
 
-      - name: Build Intel Release
+              count = text.count(old)
+
+              if count != 1:
+                  raise SystemExit(
+                      f"Expected exactly 1 occurrence in {path}, found {count}"
+                  )
+
+              path.write_text(text.replace(old, new, 1))
+              print(f"Patched {path}")
+
+          # ------------------------------------------------------------
+          # ContentView.swift
+          # ------------------------------------------------------------
+
+          replace_once(
+              "Compositor/ContentView.swift",
+              """            ToolbarSpacer(.fixed, placement: .navigation)""",
+              """            if #available(macOS 26.0, *) {
+                  ToolbarSpacer(.fixed, placement: .navigation)
+              }"""
+          )
+
+          replace_once(
+              "Compositor/ContentView.swift",
+              """            if let workspace = applicationDelegate?.workspace {
+                  ToolbarItem(placement: .navigation) {
+                      ProjectTabStrip(workspace: workspace)
+                          .frame(minWidth: 100)
+                  }
+                  .sharedBackgroundVisibility(.hidden)
+              }""",
+              """            if let workspace = applicationDelegate?.workspace {
+                  if #available(macOS 26.0, *) {
+                      ToolbarItem(placement: .navigation) {
+                          ProjectTabStrip(workspace: workspace)
+                              .frame(minWidth: 100)
+                      }
+                      .sharedBackgroundVisibility(.hidden)
+                  } else {
+                      ToolbarItem(placement: .navigation) {
+                          ProjectTabStrip(workspace: workspace)
+                              .frame(minWidth: 100)
+                      }
+                  }
+              }"""
+          )
+
+          replace_once(
+              "Compositor/ContentView.swift",
+              """            ToolbarSpacer(.flexible, placement: .navigation)""",
+              """            if #available(macOS 26.0, *) {
+                  ToolbarSpacer(.flexible, placement: .navigation)
+              }"""
+          )
+
+          # ------------------------------------------------------------
+          # BlendModePicker.swift
+          # ------------------------------------------------------------
+
+          replace_once(
+              "Compositor/UI/BlendModePicker.swift",
+              """        button.borderShape = .capsule""",
+              """        if #available(macOS 26.0, *) {
+                  button.borderShape = .capsule
+              } else {
+                  button.bezelStyle = .rounded
+              }"""
+          )
+
+          # ------------------------------------------------------------
+          # TypeControls.swift
+          # ------------------------------------------------------------
+
+          replace_once(
+              "Compositor/UI/TypeControls.swift",
+              """        button.borderShape = .capsule""",
+              """        if #available(macOS 26.0, *) {
+                  button.borderShape = .capsule
+              } else {
+                  button.bezelStyle = .rounded
+              }"""
+          )
+
+          print("macOS 15 compatibility patch applied successfully.")
+          PY
+
+      - name: Show compatibility changes
         run: |
-          set -o pipefail
+          git diff -- \
+            Compositor/ContentView.swift \
+            Compositor/UI/BlendModePicker.swift \
+            Compositor/UI/TypeControls.swift
 
+      - name: Build Intel macOS 15 release
+        run: |
           xcodebuild \
             -project Compositor.xcodeproj \
             -scheme Compositor \
@@ -48,20 +140,3 @@ jobs:
             CODE_SIGNING_ALLOWED=NO \
             CODE_SIGNING_REQUIRED=NO \
             build
-
-      - name: Verify Intel architecture
-        run: |
-          APP="$GITHUB_WORKSPACE/build/Build/Products/Release/Compositor.app"
-          BINARY="$APP/Contents/MacOS/Compositor"
-
-          file "$BINARY"
-          lipo -info "$BINARY"
-
-      - name: Update intel-sequoia
-        run: |
-          git config user.name "github-actions[bot]"
-          git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
-
-          git push \
-            https://x-access-token:${{ secrets.GITHUB_TOKEN }}@github.com/${{ github.repository }}.git \
-            HEAD:intel-sequoia
