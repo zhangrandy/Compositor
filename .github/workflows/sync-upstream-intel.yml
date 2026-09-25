@@ -62,51 +62,42 @@ jobs:
               }"""
           )
 
-          # Wrap the entire ProjectTabStrip ToolbarItem because
-          # sharedBackgroundVisibility itself is macOS 26-only.
+          # Find the ToolbarItem immediately preceding the unique
+          # sharedBackgroundVisibility modifier and wrap that item.
           path = Path("Compositor/ContentView.swift")
           lines = path.read_text().splitlines()
 
-          workspace_marker = "            if let workspace = applicationDelegate?.workspace {"
-          toolbar_marker = "            ToolbarItem(placement: .navigation) {"
-          modifier_marker = "                .sharedBackgroundVisibility(.hidden)"
-
-          workspace_indexes = [
+          modifier_indexes = [
               i for i, line in enumerate(lines)
-              if line == workspace_marker
+              if ".sharedBackgroundVisibility(.hidden)" in line
           ]
 
-          if len(workspace_indexes) != 1:
+          if len(modifier_indexes) != 1:
               raise SystemExit(
-                  f"Expected exactly 1 workspace block, found {len(workspace_indexes)}"
+                  "Expected exactly 1 sharedBackgroundVisibility modifier, "
+                  f"found {len(modifier_indexes)}"
               )
 
-          workspace_start = workspace_indexes[0]
+          modifier_index = modifier_indexes[0]
 
-          toolbar_candidates = [
-              i for i in range(workspace_start + 1, len(lines))
-              if lines[i] == toolbar_marker
-          ]
+          # The modifier belongs to the ToolbarItem immediately above it.
+          toolbar_start = None
+          depth = 0
 
-          if len(toolbar_candidates) < 1:
-              raise SystemExit("Could not find ProjectTabStrip ToolbarItem")
+          for i in range(modifier_index - 1, -1, -1):
+              line = lines[i]
 
-          toolbar_start = toolbar_candidates[0]
+              if line == "            ToolbarItem(placement: .navigation) {":
+                  toolbar_start = i
+                  break
 
-          modifier_candidates = [
-              i for i in range(toolbar_start + 1, len(lines))
-              if lines[i] == modifier_marker
-          ]
-
-          if len(modifier_candidates) != 1:
+          if toolbar_start is None:
               raise SystemExit(
-                  f"Expected exactly 1 sharedBackgroundVisibility modifier, "
-                  f"found {len(modifier_candidates)}"
+                  "Could not find ToolbarItem preceding "
+                  "sharedBackgroundVisibility"
               )
 
-          modifier_index = modifier_candidates[0]
-
-          # Find the closing brace of the ToolbarItem.
+          # Find the closing brace belonging to this ToolbarItem.
           depth = 0
           toolbar_end = None
 
@@ -119,36 +110,38 @@ jobs:
                   break
 
           if toolbar_end is None:
-              raise SystemExit("Could not determine end of ToolbarItem")
+              raise SystemExit("Could not find end of ToolbarItem")
 
+          # Include the modifier line in the macOS 26 branch.
           item = lines[toolbar_start:modifier_index + 1]
 
-          def indent(block, spaces):
-              prefix = " " * spaces
-              return [
-                  prefix + line if line else line
-                  for line in block
-              ]
-
-          # Existing ToolbarItem is already indented 12 spaces.
-          # Move it four spaces deeper inside each availability branch.
-          item_indented = [
+          # The original item is 12-space indented.
+          # Put it four spaces deeper inside each availability branch.
+          nested_item = [
               "    " + line
               for line in item
           ]
 
           replacement = [
-              "                if #available(macOS 26.0, *) {",
-              *item_indented,
-              "                } else {",
-              *item_indented,
-              "                }",
+              "            if #available(macOS 26.0, *) {",
+              *nested_item,
+              "            } else {",
           ]
+
+          # For the macOS 15 branch, remove the macOS-26-only modifier.
+          fallback_item = [
+              "    " + line
+              for line in item
+              if ".sharedBackgroundVisibility(.hidden)" not in line
+          ]
+
+          replacement.extend(fallback_item)
+          replacement.append("            }")
 
           lines[toolbar_start:modifier_index + 1] = replacement
 
           path.write_text("\n".join(lines) + "\n")
-          print("Patched ContentView.swift ProjectTabStrip availability")
+          print("Patched ContentView.swift sharedBackgroundVisibility")
 
           # ------------------------------------------------------------
           # BlendModePicker.swift
