@@ -24,6 +24,41 @@ jobs:
           xcodebuild -version
           xcode-select -p
 
+      - name: Fix CameraRawShadows type-check complexity
+        run: |
+          python3 <<'PY'
+          from pathlib import Path
+
+          path = Path("Compositor/Document/CameraRawShadows.swift")
+          source = path.read_text()
+
+          old = "return (0..<count).map { i in (lower?[i] ?? 0) * (1 - t) + (upper?[i] ?? 0) * t }"
+
+          new = """return (0..<count).map { i in
+              let lowerValue: Float = lower?[i] ?? 0
+              let upperValue: Float = upper?[i] ?? 0
+              let oneMinusT: Float = 1.0 - t
+              let lowerContribution: Float = lowerValue * oneMinusT
+              let upperContribution: Float = upperValue * t
+              return lowerContribution + upperContribution
+          }"""
+
+          count = source.count(old)
+          if count != 1:
+              raise SystemExit(
+                  f"Expected exactly one CameraRawShadows expression, found {count}. "
+                  "Upstream may have changed; review the source before patching."
+              )
+
+          path.write_text(source.replace(old, new, 1))
+          print(f"Patched {path}")
+          PY
+
+      - name: Show source patch
+        run: |
+          git diff --check
+          git diff -- Compositor/Document/CameraRawShadows.swift
+
       - name: Build Intel macOS 26 release
         run: |
           xcodebuild \
